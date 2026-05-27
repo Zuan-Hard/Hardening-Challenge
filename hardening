@@ -280,7 +280,7 @@ TASKS = {
     ]},
     5: {"title": "TASK 5: SNORT IDS", "items": [
         "5.1 Install Snort",
-        "5.2 Konfigurasi Snort (HOME_NET bukan 'any', test config ok)",
+        "5.2 Konfigurasi Snort berhasil divalidasi dengan parameter jaringan yang sudah disesuaikan",
         "5.3 Buat local.rules dengan minimal 2 aturan: port scan dan icmp flood (msg mengandung 'port scan' dan 'icmp flood')",
         "5.4 Jalankan Snort sebagai daemon (-D)",
         "5.5 Lakukan scan dan ping flood, pastikan alert muncul di /var/log/snort/alert"
