@@ -2,9 +2,8 @@
 import os
 import sys
 import time
-import argparse
 import subprocess
-import threading
+import argparse
 import urllib.request
 import shutil
 import socket
@@ -22,39 +21,43 @@ BOLD = '\033[1m'
 RESET = '\033[0m'
 
 # ========================
-# Konstanta & Variabel Global
+# Konfigurasi
 # ========================
 SETUP_FLAG = "/root/.hardening_setup_done"
 LAMPP_URL = "https://sourceforge.net/projects/xampp/files/XAMPP%20Linux/8.2.12/xampp-linux-x64-8.2.12-0-installer.run/download"
 LAMPP_INSTALLER = "/tmp/xampp-installer.run"
 LAMPP_PATH = "/opt/lampp"
 
-# Timer (start saat script dijalankan)
+# Timer global (start saat script dijalankan)
 start_time = time.time()
 
 # ========================
-# Fungsi Bantu Tampilan
+# Fungsi bantu tampilan
 # ========================
-def print_header():
-    """Menampilkan header dengan stopwatch dan info sistem"""
+def get_elapsed():
     elapsed = time.time() - start_time
-    hours = int(elapsed // 3600)
-    minutes = int((elapsed % 3600) // 60)
-    seconds = int(elapsed % 60)
-    timer_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-    hostname = socket.gethostname()
+    return time.strftime("%H:%M:%S", time.gmtime(elapsed))
+
+def get_ip():
     try:
         ip = subprocess.getoutput("ip route get 1 | awk '{print $7;exit}'").strip()
         if not ip:
             ip = "127.0.0.1"
     except:
         ip = "127.0.0.1"
+    return ip
+
+def print_header():
+    os.system('clear')
+    host = socket.gethostname()
+    ip = get_ip()
     os_info = f"{platform.system()} {platform.release()}"
+    timer = get_elapsed()
     print(f"{BLUE}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓{RESET}")
-    print(f"{BLUE}┃{RESET} {BOLD}HARDENING CHALLENGE FOR BLUE TEAM - v1.0{RESET}                               ")
+    print(f"{BLUE}┃{RESET} {BOLD}HARDENING CHALLENGE FOR BLUE TEAM - v1.0{RESET}                              ")
     print(f"{BLUE}┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫{RESET}")
-    print(f"{BLUE}┃{RESET} Hostname: {hostname} | IP: {ip} | OS: {os_info}                 ")
-    print(f"{BLUE}┃{RESET} ⏱️  Waktu berjalan: {timer_str}                                             ")
+    print(f"{BLUE}┃{RESET} Hostname: {host} | IP: {ip} | OS: {os_info}                 ")
+    print(f"{BLUE}┃{RESET} ⏱️  Waktu berjalan: {timer}                                                 ")
     print(f"{BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛{RESET}")
 
 def print_info(msg):
@@ -69,18 +72,11 @@ def print_error(msg):
 def print_step(msg):
     print(f"{YELLOW}[STEP]{RESET} {msg}")
 
-def run_cmd(cmd, shell=True, capture=True):
-    if shell:
-        proc = subprocess.run(cmd, shell=True, text=True, capture_output=capture)
-    else:
-        proc = subprocess.run(cmd.split(), text=True, capture_output=capture)
-    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-
 def confirm(prompt):
     resp = input(f"{YELLOW}{prompt} (y/N): {RESET}").strip().lower()
     return resp == 'y'
 
-def spinner(message, duration=0.5):
+def spinner(message, duration=0.8):
     chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
     end = time.time() + duration
     i = 0
@@ -103,7 +99,7 @@ def progress_bar(current, total, prefix=""):
         print()
 
 # ========================
-# Fungsi Setup Environment (Tanpa Detail)
+# Setup environment (tanpa rincian)
 # ========================
 def setup_environment(force=False):
     if not force and os.path.exists(SETUP_FLAG):
@@ -116,7 +112,7 @@ def setup_environment(force=False):
         print_info("Dibatalkan.")
         return False
 
-    # Langkah 1: Download komponen
+    # Langkah 1: download
     print_step("Mengunduh komponen pendukung...")
     if not os.path.exists(LAMPP_INSTALLER):
         try:
@@ -126,152 +122,183 @@ def setup_environment(force=False):
         except Exception as e:
             print_error(f"Gagal download: {e}")
             return False
-    else:
-        print_info("Sudah ada.")
 
-    # Langkah 2: Ekstrak/install
+    # Langkah 2: install
     print_step("Mengekstrak dan memasang...")
     if not os.path.exists(LAMPP_PATH):
-        ret, _, err = run_cmd(f"{LAMPP_INSTALLER} --mode unattended --installdir {LAMPP_PATH}")
+        ret = subprocess.run(f"{LAMPP_INSTALLER} --mode unattended --installdir {LAMPP_PATH}", shell=True).returncode
         if ret != 0:
-            print_error(f"Instalasi gagal: {err}")
+            print_error("Instalasi gagal")
             return False
+    spinner("Instalasi", 1)
     print_success("Langkah 2 selesai.")
 
-    # Langkah 3: Menanamkan anomali sistem (tidak dirinci)
+    # Langkah 3: tanam anomali (tidak dirinci)
     print_step("Menanamkan anomali sistem...")
     # Start LAMPP
-    run_cmd("sudo /opt/lampp/lampp start")
+    subprocess.run("sudo /opt/lampp/lampp start", shell=True)
     # Reset MySQL root password kosong
-    run_cmd("sudo /opt/lampp/bin/mysqladmin -u root password ''")
-    # Anomali MySQL: user anonim, attacker@%, test db, bind-address, local_infile
+    subprocess.run("sudo /opt/lampp/bin/mysqladmin -u root password ''", shell=True)
+    # Anomali MySQL
     mysql_cmd = "sudo /opt/lampp/bin/mysql -u root -e"
-    run_cmd(f'{mysql_cmd} "CREATE USER IF NOT EXISTS ''@''localhost''; GRANT ALL ON *.* TO ''@''localhost'';"')
-    run_cmd(f'{mysql_cmd} "CREATE USER IF NOT EXISTS ''attacker''@''%'' IDENTIFIED BY ''weak''; GRANT ALL PRIVILEGES ON *.* TO ''attacker''@''%'' WITH GRANT OPTION;"')
-    run_cmd(f'{mysql_cmd} "CREATE DATABASE IF NOT EXISTS test;"')
+    subprocess.run(f'{mysql_cmd} "CREATE USER IF NOT EXISTS ''@''localhost''; GRANT ALL ON *.* TO ''@''localhost'';"', shell=True)
+    subprocess.run(f'{mysql_cmd} "CREATE USER IF NOT EXISTS ''attacker''@''%'' IDENTIFIED BY ''weak''; GRANT ALL PRIVILEGES ON *.* TO ''attacker''@''%'' WITH GRANT OPTION;"', shell=True)
+    subprocess.run(f'{mysql_cmd} "CREATE DATABASE IF NOT EXISTS test;"', shell=True)
     with open("/opt/lampp/etc/my.cnf", "a") as f:
         f.write("\nbind-address = 0.0.0.0\nlocal_infile = 1\n")
-    run_cmd("sudo /opt/lampp/lampp restartmysql")
+    subprocess.run("sudo /opt/lampp/lampp restartmysql", shell=True)
     # UFW default allow, buka port berbahaya
-    run_cmd("sudo ufw --force reset")
-    run_cmd("sudo ufw default allow incoming")
+    subprocess.run("sudo ufw --force reset", shell=True)
+    subprocess.run("sudo ufw default allow incoming", shell=True)
     for port in [21,23,3306,22]:
-        run_cmd(f"sudo ufw allow {port}/tcp")
-    run_cmd("sudo ufw --force enable")
+        subprocess.run(f"sudo ufw allow {port}/tcp", shell=True)
+    subprocess.run("sudo ufw --force enable", shell=True)
     # SSH tidak aman
     sshd_config = "/etc/ssh/sshd_config"
     if os.path.exists(sshd_config):
         shutil.copy(sshd_config, f"{sshd_config}.bak")
-        run_cmd(f"sudo sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' {sshd_config}")
-        run_cmd(f"sudo sed -i 's/^MaxAuthTries.*/MaxAuthTries 10/' {sshd_config}")
-        run_cmd(f"sudo sed -i 's/^ClientAliveInterval.*/ClientAliveInterval 0/' {sshd_config}")
-        run_cmd(f"sudo sed -i 's/^LogLevel.*/LogLevel INFO/' {sshd_config}")
-        run_cmd("sudo systemctl restart ssh")
-    # Aktifkan telnet & ftp
-    run_cmd("sudo apt update -qq")
-    run_cmd("sudo apt install -y telnetd vsftpd")
-    run_cmd("sudo systemctl enable --now telnetd vsftpd")
+        subprocess.run(f"sudo sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' {sshd_config}", shell=True)
+        subprocess.run(f"sudo sed -i 's/^MaxAuthTries.*/MaxAuthTries 10/' {sshd_config}", shell=True)
+        subprocess.run(f"sudo sed -i 's/^ClientAliveInterval.*/ClientAliveInterval 0/' {sshd_config}", shell=True)
+        subprocess.run(f"sudo sed -i 's/^LogLevel.*/LogLevel INFO/' {sshd_config}", shell=True)
+        subprocess.run("sudo systemctl restart ssh", shell=True)
+    # Aktifkan telnet & vsftpd
+    subprocess.run("sudo apt update -qq", shell=True)
+    subprocess.run("sudo apt install -y telnetd vsftpd", shell=True)
+    subprocess.run("sudo systemctl enable --now telnetd", shell=True)
+    subprocess.run("sudo systemctl enable --now vsftpd", shell=True)
     # Hapus artefak PGP
     for f in ["public-lks.asc", "pesan.txt", "pesan.txt.gpg", "pesan.txt.sig"]:
         if os.path.exists(f):
             os.remove(f)
-    # Spinner simulasi agar terlihat ada proses
-    spinner("Menanamkan anomali", duration=2)
+    spinner("Menanamkan anomali", 2)
     print_success("Langkah 3 selesai.")
 
-    # Langkah 4: Menyelesaikan persiapan
+    # Langkah 4: finalisasi
     print_step("Menyelesaikan persiapan...")
     with open(SETUP_FLAG, 'w') as f:
         f.write("setup completed")
-    spinner("Finalisasi", duration=1)
+    spinner("Finalisasi", 1)
     print_success("Setup selesai. Sistem siap untuk tantangan hardening.")
     return True
 
 # ========================
-# Fungsi Scoring (Placeholder - logika pengecekan akan ditambahkan nanti)
+# Data soal (deskripsi per task)
+# ========================
+TASKS = {
+    1: {
+        "title": "TASK 1: FIREWALL & PORT SECURITY",
+        "items": [
+            "1.1 Aktifkan UFW dengan default deny incoming",
+            "1.2 Blokir port berbahaya (21,23,25)",
+            "1.3 Izinkan HTTP (80) dan SSH hanya dari subnet tertentu",
+            "1.4 Set logging UFW ke low",
+            "1.5 Matikan service telnet dan ftp"
+        ]
+    },
+    2: {
+        "title": "TASK 2: HARDENING SSH",
+        "items": [
+            "2.1 Nonaktifkan root login via SSH",
+            "2.2 Batasi percobaan login gagal (MaxAuthTries ≤ 3)",
+            "2.3 Nonaktifkan forwarding berbahaya (Agent, TCP, Gateway, X11)",
+            "2.4 Atur ClientAliveInterval ≤ 300 detik",
+            "2.5 Tingkatkan logging SSH (VERBOSE)",
+            "2.6 Siapkan autentikasi kunci SSH"
+        ]
+    },
+    3: {
+        "title": "TASK 3: PGP ENKRIPSI EMAIL",
+        "items": [
+            "3.1 Install GnuPG",
+            "3.2 Buat key pair (LKS SMK / lks@smkprovinsi.id)",
+            "3.3 Ekspor public key ke public-lks.asc",
+            "3.4 Buat file pesan.txt berisi pesan rahasia",
+            "3.5 Enkripsi pesan menjadi pesan.txt.gpg",
+            "3.6 Buat dan verifikasi signature digital"
+        ]
+    },
+    4: {
+        "title": "TASK 4: KEAMANAN MYSQL (LAMPP)",
+        "items": [
+            "4.1 Hapus anonymous user dan database test",
+            "4.2 Hapus akun berbahaya (attacker@%)",
+            "4.3 Set bind-address = 127.0.0.1 dan nonaktifkan local_infile",
+            "4.4 Buat user lksuser dengan hak SELECT, INSERT, UPDATE, DELETE",
+            "4.5 Buat laporan hardening MySQL di /root/mysql_hardening_report.txt"
+        ]
+    }
+}
+
+def show_soal_submenu():
+    while True:
+        print_header()
+        print(f"{BOLD}{CYAN}📚 DAFTAR SOAL:{RESET}")
+        for i in range(1, 5):
+            print(f"   [{i}] {TASKS[i]['title']}")
+        print("   [0] Kembali ke Menu Utama")
+        choice = input(f"{CYAN}👉 Pilih task [0-4]: {RESET}").strip()
+        if choice == '0':
+            break
+        elif choice in ['1','2','3','4']:
+            task_id = int(choice)
+            print_header()
+            print(f"{BOLD}{CYAN}{TASKS[task_id]['title']}{RESET}")
+            print(f"{BLUE}┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫{RESET}")
+            for item in TASKS[task_id]['items']:
+                print(f"  {item}")
+            print(f"{BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛{RESET}")
+            input("\nTekan Enter untuk kembali ke daftar task...")
+        else:
+            print_error("Pilihan tidak valid.")
+            time.sleep(1)
+
+# ========================
+# Scoring (placeholder)
 # ========================
 def run_scoring():
     print_header()
     print_info("Memulai proses scoring...")
-    # Di sini nanti akan diletakkan fungsi scoring dengan spinner per sub-task
-    # Contoh:
-    print_step("Task 1: Firewall & Port Security")
-    # Simulasi beberapa cek
-    time.sleep(0.5)
+    # Simulasi beberapa cek (nanti ganti dengan logika nyata)
+    print(f"{BLUE}┌─────────────────── SCORING OTOMATIS ───────────────────┐{RESET}")
+    # Contoh output
+    print(f"  TASK 1: FIREWALL & PORT SECURITY")
     print(f"    1.1 Kebijakan default firewall ... {GREEN}✅ BERHASIL (+2){RESET}")
     print(f"    1.2 Port berbahaya diblokir ...... {RED}❌ KURANG AMAN (0){RESET}")
     print(f"    1.3 Layanan web (HTTP) dapat diakses {GREEN}✅ BERHASIL (+1){RESET}")
-    print_step("Task 2: Hardening SSH")
-    print(f"    2.1 Root login via SSH ... {RED}❌ KURANG AMAN (0){RESET}")
-    # ... tambahkan task 3, 4 nanti
-    total_score = 3
+    print(f"    1.4 Logging firewall ............. {RED}❌ KURANG AMAN (0){RESET}")
+    print(f"    1.5 Layanan tidak aman mati ....... {GREEN}✅ BERHASIL (+2){RESET}")
+    print(f"  TASK 2: HARDENING SSH")
+    print(f"    2.1 Root login via SSH ........... {RED}❌ KURANG AMAN (0){RESET}")
+    print(f"    2.2 MaxAuthTries ≤ 3 ............. {GREEN}✅ BERHASIL (+2){RESET}")
+    # dan seterusnya...
+    total = 5
     max_score = 40
-    print(f"\n📊 TOTAL SKOR: {total_score} / {max_score}")
-    elapsed = time.time() - start_time
-    print(f"⏱️  Waktu pengerjaan: {time.strftime('%H:%M:%S', time.gmtime(elapsed))}")
+    print(f"{BLUE}└────────────────────────────────────────────────────────────┘{RESET}")
+    print(f"📊 TOTAL SKOR: {total} / {max_score}")
+    print(f"⏱️  Waktu pengerjaan: {get_elapsed()}")
+    input("\nTekan Enter untuk kembali ke menu utama...")
 
 # ========================
-# Fungsi Lihat Soal (Ringkas, tanpa poin)
-# ========================
-def show_questions():
-    print_header()
-    print(f"{BOLD}{CYAN}DAFTAR SOAL HARDENING{RESET}\n")
-    tasks = [
-        ("TASK 1: FIREWALL & PORT SECURITY",
-         ["1.1 Aktifkan UFW dengan default deny incoming",
-          "1.2 Blokir port berbahaya (21,23,25)",
-          "1.3 Izinkan HTTP (80) dan SSH hanya dari subnet tertentu",
-          "1.4 Set logging UFW ke low",
-          "1.5 Matikan service telnet dan ftp"]),
-        ("TASK 2: HARDENING SSH",
-         ["2.1 Nonaktifkan root login via SSH",
-          "2.2 Batasi percobaan login gagal (MaxAuthTries ≤ 3)",
-          "2.3 Nonaktifkan forwarding berbahaya (Agent, TCP, Gateway, X11)",
-          "2.4 Atur ClientAliveInterval ≤ 300 detik",
-          "2.5 Tingkatkan logging SSH (VERBOSE)",
-          "2.6 Siapkan autentikasi kunci SSH"]),
-        ("TASK 3: PGP ENKRIPSI EMAIL",
-         ["3.1 Install GnuPG",
-          "3.2 Buat key pair (LKS SMK / lks@smkprovinsi.id)",
-          "3.3 Ekspor public key ke public-lks.asc",
-          "3.4 Buat file pesan.txt berisi pesan rahasia",
-          "3.5 Enkripsi pesan menjadi pesan.txt.gpg",
-          "3.6 Buat dan verifikasi signature digital"]),
-        ("TASK 4: KEAMANAN MYSQL (LAMPP)",
-         ["4.1 Hapus anonymous user dan database test",
-          "4.2 Hapus akun berbahaya (attacker@%)",
-          "4.3 Set bind-address = 127.0.0.1 dan nonaktifkan local_infile",
-          "4.4 Buat user lksuser dengan hak SELECT, INSERT, UPDATE, DELETE",
-          "4.5 Buat laporan hardening MySQL di /root/mysql_hardening_report.txt"])
-    ]
-    for title, items in tasks:
-        print(f"{BOLD}{CYAN}{title}{RESET}")
-        for item in items:
-            print(f"  • {item}")
-        print()
-    input("Tekan Enter untuk kembali...")
-
-# ========================
-# Menu Utama
+# Menu utama
 # ========================
 def main_menu():
     while True:
-        os.system('clear')
         print_header()
         if os.path.exists(SETUP_FLAG):
             print(f"{GREEN}✅ STATUS: Environment terdeteksi (sudah dalam kondisi rusak){RESET}")
         else:
             print(f"{RED}❌ STATUS: Environment BELUM disetup. Pilih opsi 2 untuk memulai.{RESET}")
         print(f"\n{BOLD}📋 Pilih tindakan:{RESET}")
-        print("   [1] Lihat Soal")
-        print("   [2] Setup Ulang (Reset + Install ulang environment rusak)")
-        print("   [3] Jalankan Scoring Otomatis")
+        print("   [1] Soal")
+        print("   [2] Setup Ulang")
+        print("   [3] Scoring")
         print("   [0] Keluar")
         choice = input(f"{CYAN}👉 Masukkan nomor [0-3]: {RESET}").strip()
         if choice == '1':
-            show_questions()
+            show_soal_submenu()
         elif choice == '2':
-            if confirm("Ini akan menghapus setup sebelumnya dan menginstal ulang environment. Lanjutkan?"):
+            if confirm("⚠️  Setup ulang akan menginstal ulang environment rusak. Semua progress hardening akan hilang. Yakin?"):
                 if os.path.exists(SETUP_FLAG):
                     os.remove(SETUP_FLAG)
                 setup_environment(force=True)
@@ -280,31 +307,30 @@ def main_menu():
             input("Tekan Enter untuk melanjutkan...")
         elif choice == '3':
             run_scoring()
-            input("Tekan Enter untuk melanjutkan...")
         elif choice == '0':
-            print_info("Terima kasih.")
+            print_info("Terima kasih. Sampai jumpa!")
             sys.exit(0)
         else:
             print_error("Pilihan tidak valid.")
             time.sleep(1)
 
 # ========================
-# Main dengan Argparse
+# Main dengan argparse
 # ========================
 def main():
-    parser = argparse.ArgumentParser(description='HARDENING CHALLENGE FOR BLUE TEAM - LKS Cybersecurity 2026')
-    parser.add_argument('--setup', action='store_true', help='Setup environment rusak (instalasi + anomali)')
-    parser.add_argument('--reset', action='store_true', help='Hapus tanda setup (agar prompt muncul lagi)')
-    parser.add_argument('--score', action='store_true', help='Langsung jalankan scoring tanpa menu')
-    parser.add_argument('--questions', action='store_true', help='Tampilkan soal tanpa menu')
+    parser = argparse.ArgumentParser(description='HARDENING CHALLENGE FOR BLUE TEAM')
+    parser.add_argument('--setup', action='store_true', help='Setup environment (install LAMPP + anomali)')
+    parser.add_argument('--reset', action='store_true', help='Hapus flag setup')
+    parser.add_argument('--score', action='store_true', help='Langsung scoring')
+    parser.add_argument('--questions', action='store_true', help='Tampilkan semua soal')
     args = parser.parse_args()
 
     if args.reset:
         if os.path.exists(SETUP_FLAG):
             os.remove(SETUP_FLAG)
-            print_success("Flag setup dihapus. Jalankan tanpa argumen untuk memulai setup ulang.")
+            print_success("Flag setup dihapus.")
         else:
-            print_info("Tidak ada flag setup yang ditemukan.")
+            print_info("Tidak ada flag setup.")
         return
 
     if args.setup:
@@ -316,16 +342,20 @@ def main():
         return
 
     if args.questions:
-        show_questions()
+        # tampilkan semua soal sekaligus lalu keluar
+        for task_id in range(1,5):
+            print(f"\n{BOLD}{CYAN}{TASKS[task_id]['title']}{RESET}")
+            for item in TASKS[task_id]['items']:
+                print(f"  {item}")
         return
 
-    # Tanpa argumen: cek flag
+    # Tanpa argumen: cek setup
     if not os.path.exists(SETUP_FLAG):
         print_info("Belum ada setup environment.")
         if confirm("Lakukan setup sekarang?"):
             setup_environment(force=True)
         else:
-            print_info("Anda bisa menjalankan nanti dengan --setup")
+            print_info("Anda bisa jalankan nanti dengan --setup")
             sys.exit(0)
 
     main_menu()
