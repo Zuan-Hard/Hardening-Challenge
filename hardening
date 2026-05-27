@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Hardening Challenge for Blue Team
+LKS Cybersecurity - Final Version (Tasks 1-5)
+"""
+
 import os
 import sys
 import time
@@ -27,8 +33,9 @@ SETUP_FLAG = "/root/.hardening_setup_done"
 LAMPP_URL = "https://sourceforge.net/projects/xampp/files/XAMPP%20Linux/8.2.12/xampp-linux-x64-8.2.12-0-installer.run/download"
 LAMPP_INSTALLER = "/tmp/xampp-installer.run"
 LAMPP_PATH = "/opt/lampp"
+MYSQL_CMD = f"sudo {LAMPP_PATH}/bin/mysql -u root"
 
-# Timer global (start saat script dijalankan)
+# Timer global
 start_time = time.time()
 
 # ========================
@@ -76,30 +83,282 @@ def confirm(prompt):
     resp = input(f"{YELLOW}{prompt} (y/N): {RESET}").strip().lower()
     return resp == 'y'
 
-def spinner(message, duration=0.8):
-    chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-    end = time.time() + duration
-    i = 0
-    while time.time() < end:
-        sys.stdout.write(f"\r{message} {chars[i % len(chars)]}")
-        sys.stdout.flush()
-        time.sleep(0.1)
-        i += 1
-    sys.stdout.write(f"\r{message} {' ' * 10}\r")
-    sys.stdout.flush()
-
-def progress_bar(current, total, prefix=""):
-    bar_len = 30
-    filled = int(bar_len * current // total)
-    bar = '█' * filled + '░' * (bar_len - filled)
-    pct = (current / total) * 100
-    sys.stdout.write(f"\r{prefix} [{bar}] {pct:.0f}%")
-    sys.stdout.flush()
-    if current == total:
-        print()
+def run_cmd(cmd):
+    """Jalankan perintah shell, kembalikan (returncode, stdout)"""
+    proc = subprocess.run(cmd, shell=True, text=True, capture_output=True)
+    return proc.returncode, proc.stdout.strip()
 
 # ========================
-# Setup environment (tanpa rincian)
+# Fungsi pengecekan Task 1-4 (sama seperti sebelumnya)
+# ========================
+def check_ufw_default_deny():
+    rc, _ = run_cmd("sudo ufw status | grep -q 'Default: deny (incoming)'")
+    return rc == 0
+
+def check_bad_ports_blocked():
+    rc, _ = run_cmd("sudo ufw status | grep -E '(21|23|25)/tcp.*ALLOW IN'")
+    return rc != 0
+
+def check_http_allowed():
+    rc, _ = run_cmd("sudo ufw status | grep -q '80/tcp.*ALLOW IN'")
+    return rc == 0
+
+def check_ufw_logging_low():
+    rc, _ = run_cmd("sudo ufw status verbose | grep -q 'Logging: on (low)'")
+    return rc == 0
+
+def check_telnet_ftp_disabled():
+    rc1, _ = run_cmd("systemctl is-active --quiet telnetd")
+    rc2, _ = run_cmd("systemctl is-active --quiet vsftpd")
+    return rc1 != 0 and rc2 != 0
+
+def check_root_login_disabled():
+    rc, _ = run_cmd("sudo sshd -T | grep -q 'permitrootlogin no'")
+    return rc == 0
+
+def check_maxauthtries():
+    rc, out = run_cmd("sudo sshd -T | grep -E '^maxauthtries' | awk '{print $2}'")
+    if rc == 0 and out.isdigit():
+        return int(out) <= 3
+    return False
+
+def check_ssh_forwarding_disabled():
+    checks = [
+        "sudo sshd -T | grep -q 'allowagentforwarding no'",
+        "sudo sshd -T | grep -q 'allowtcpforwarding no'",
+        "sudo sshd -T | grep -q 'gatewayports no'",
+        "sudo sshd -T | grep -q 'x11forwarding no'"
+    ]
+    for cmd in checks:
+        rc, _ = run_cmd(cmd)
+        if rc != 0:
+            return False
+    return True
+
+def check_clientaliveinterval():
+    rc, out = run_cmd("sudo sshd -T | grep -E '^clientaliveinterval' | awk '{print $2}'")
+    if rc == 0 and out.isdigit():
+        return int(out) <= 300
+    return False
+
+def check_ssh_loglevel():
+    rc, _ = run_cmd("sudo sshd -T | grep -q 'loglevel VERBOSE'")
+    return rc == 0
+
+def check_ssh_keypair():
+    return os.path.isdir("/root/key-pair-ssh") and any(f.endswith(".pub") for f in os.listdir("/root/key-pair-ssh"))
+
+def check_gpg_installed():
+    rc, _ = run_cmd("which gpg")
+    return rc == 0
+
+def check_gpg_keypair():
+    rc, _ = run_cmd("gpg --list-keys --with-colons | grep -q 'lks@smkprovinsi.id'")
+    return rc == 0
+
+def check_public_key_exported():
+    return os.path.isfile("public-lks.asc")
+
+def check_pesan_txt():
+    if not os.path.isfile("pesan.txt"):
+        return False
+    try:
+        with open("pesan.txt", "r") as f:
+            return "Ini adalah pesan rahasia untuk panitia LKS." in f.read()
+    except:
+        return False
+
+def check_pesan_gpg():
+    return os.path.isfile("pesan.txt.gpg")
+
+def check_signature():
+    rc, _ = run_cmd("gpg --verify pesan.txt.sig pesan.txt 2>/dev/null")
+    return rc == 0
+
+def check_mysql_anonymous():
+    rc, out = run_cmd(f"{MYSQL_CMD} -e \"SELECT User FROM mysql.user WHERE User='';\" 2>/dev/null | grep -v User | grep -q ''")
+    return rc != 0
+
+def check_mysql_attacker_removed():
+    rc, out = run_cmd(f"{MYSQL_CMD} -e \"SELECT User FROM mysql.user WHERE User='attacker' AND Host='%';\" 2>/dev/null | grep -q attacker")
+    return rc != 0
+
+def check_mysql_bind_local_infile():
+    rc1, _ = run_cmd(f"grep -E '^bind-address\\s*=\\s*127.0.0.1' {LAMPP_PATH}/etc/my.cnf")
+    rc2, _ = run_cmd(f"{MYSQL_CMD} -e \"SHOW GLOBAL VARIABLES LIKE 'local_infile';\" 2>/dev/null | grep -q 'OFF'")
+    return rc1 == 0 and rc2 == 0
+
+def check_mysql_lksuser():
+    rc1, _ = run_cmd(f"{MYSQL_CMD} -e \"SELECT Db,Select_priv,Insert_priv,Update_priv,Delete_priv FROM mysql.db WHERE User='lksuser' AND Db='lks_db';\" 2>/dev/null | grep -q 'lks_db'")
+    if rc1 != 0:
+        return False
+    rc2, _ = run_cmd(f"{MYSQL_CMD} -e \"SELECT Drop_priv,Create_priv,Grant_priv FROM mysql.db WHERE User='lksuser' AND Db='lks_db';\" 2>/dev/null | grep -q 'Y'")
+    return rc2 != 0
+
+def check_mysql_report():
+    return os.path.isfile("/root/mysql_hardening_report.txt")
+
+# ========================
+# Fungsi pengecekan Task 5 (Snort)
+# ========================
+def check_snort_installed():
+    rc, _ = run_cmd("snort -V")
+    return rc == 0
+
+def check_snort_config():
+    # Cek HOME_NET tidak boleh "any"
+    rc1, out = run_cmd("grep -E '^ipvar HOME_NET any' /etc/snort/snort.conf")
+    if rc1 == 0:
+        return False
+    # Test konfigurasi
+    rc2, _ = run_cmd("snort -T -c /etc/snort/snort.conf 2>/dev/null")
+    return rc2 == 0
+
+def check_snort_local_rules():
+    if not os.path.isfile("/etc/snort/local.rules"):
+        return False
+    # Baca file
+    with open("/etc/snort/local.rules", "r") as f:
+        content = f.read().lower()
+    # Cek ada kata "port scan" dan "icmp flood" di msg
+    if "port scan" not in content:
+        return False
+    if "icmp flood" not in content:
+        return False
+    # Minimal ada 2 aturan (bisa lebih)
+    lines = [l.strip() for l in content.split('\n') if l.strip() and not l.strip().startswith('#')]
+    # Aturan Snort biasanya diawali dengan "alert"
+    rules = [l for l in lines if l.startswith('alert')]
+    return len(rules) >= 2
+
+def check_snort_daemon():
+    rc, _ = run_cmd("pgrep -f 'snort.*-D'")
+    return rc == 0
+
+def check_snort_alert():
+    if not os.path.isfile("/var/log/snort/alert"):
+        return False
+    if os.path.getsize("/var/log/snort/alert") == 0:
+        return False
+    with open("/var/log/snort/alert", "r") as f:
+        content = f.read().lower()
+    return "port scan" in content and "icmp flood" in content
+
+# ========================
+# Data soal (deskripsi untuk tampilan)
+# ========================
+TASKS = {
+    1: {"title": "TASK 1: FIREWALL & PORT SECURITY", "items": [
+        "1.1 Aktifkan UFW dengan default deny incoming",
+        "1.2 Blokir port berbahaya (21,23,25)",
+        "1.3 Izinkan HTTP (80) dan SSH hanya dari subnet tertentu",
+        "1.4 Set logging UFW ke low",
+        "1.5 Matikan service telnet dan ftp"
+    ]},
+    2: {"title": "TASK 2: HARDENING SSH", "items": [
+        "2.1 Nonaktifkan root login via SSH",
+        "2.2 Batasi percobaan login gagal (MaxAuthTries ≤ 3)",
+        "2.3 Nonaktifkan forwarding berbahaya (Agent, TCP, Gateway, X11)",
+        "2.4 Atur ClientAliveInterval ≤ 300 detik",
+        "2.5 Tingkatkan logging SSH (VERBOSE)",
+        "2.6 Siapkan autentikasi kunci SSH"
+    ]},
+    3: {"title": "TASK 3: PGP ENKRIPSI EMAIL", "items": [
+        "3.1 Install GnuPG",
+        "3.2 Buat key pair (LKS SMK / lks@smkprovinsi.id)",
+        "3.3 Ekspor public key ke public-lks.asc",
+        "3.4 Buat file pesan.txt berisi pesan rahasia",
+        "3.5 Enkripsi pesan menjadi pesan.txt.gpg",
+        "3.6 Buat dan verifikasi signature digital"
+    ]},
+    4: {"title": "TASK 4: KEAMANAN MYSQL (LAMPP)", "items": [
+        "4.1 Hapus anonymous user dan database test",
+        "4.2 Hapus akun berbahaya (attacker@%)",
+        "4.3 Set bind-address = 127.0.0.1 dan nonaktifkan local_infile",
+        "4.4 Buat user lksuser dengan hak SELECT, INSERT, UPDATE, DELETE",
+        "4.5 Buat laporan hardening MySQL di /root/mysql_hardening_report.txt"
+    ]},
+    5: {"title": "TASK 5: SNORT IDS", "items": [
+        "5.1 Install Snort",
+        "5.2 Konfigurasi Snort (HOME_NET bukan 'any', test config ok)",
+        "5.3 Buat local.rules dengan minimal 2 aturan: port scan dan icmp flood (msg mengandung 'port scan' dan 'icmp flood')",
+        "5.4 Jalankan Snort sebagai daemon (-D)",
+        "5.5 Lakukan scan dan ping flood, pastikan alert muncul di /var/log/snort/alert"
+    ]}
+}
+
+# ========================
+# Fungsi Scoring (semua task)
+# ========================
+def run_scoring():
+    print_header()
+    print_info("Memulai proses scoring...")
+    print(f"{BLUE}┌─────────────────── SCORING OTOMATIS ───────────────────┐{RESET}")
+
+    # Daftar pengecekan: (task_id, sub_id, desc, check_func, max_score)
+    checks = [
+        # Task 1
+        (1, 1, "1.1 Kebijakan default firewall", check_ufw_default_deny, 2),
+        (1, 2, "1.2 Port berbahaya diblokir", check_bad_ports_blocked, 2),
+        (1, 3, "1.3 Layanan web (HTTP) dapat diakses", check_http_allowed, 1),
+        (1, 4, "1.4 Logging firewall", check_ufw_logging_low, 1),
+        (1, 5, "1.5 Layanan tidak aman mati", check_telnet_ftp_disabled, 2),
+        # Task 2
+        (2, 1, "2.1 Root login via SSH", check_root_login_disabled, 2),
+        (2, 2, "2.2 MaxAuthTries ≤ 3", check_maxauthtries, 2),
+        (2, 3, "2.3 Forwarding berbahaya dinonaktifkan", check_ssh_forwarding_disabled, 2),
+        (2, 4, "2.4 ClientAliveInterval ≤ 300", check_clientaliveinterval, 1),
+        (2, 5, "2.5 Logging SSH VERBOSE", check_ssh_loglevel, 1),
+        (2, 6, "2.6 Autentikasi kunci SSH siap", check_ssh_keypair, 2),
+        # Task 3
+        (3, 1, "3.1 GnuPG terinstall", check_gpg_installed, 1),
+        (3, 2, "3.2 Key pair PGP (lks@smkprovinsi.id)", check_gpg_keypair, 2),
+        (3, 3, "3.3 Public key diekspor (public-lks.asc)", check_public_key_exported, 1),
+        (3, 4, "3.4 File pesan.txt ada", check_pesan_txt, 1),
+        (3, 5, "3.5 Enkripsi pesan (pesan.txt.gpg)", check_pesan_gpg, 1),
+        (3, 6, "3.6 Signature digital valid", check_signature, 2),
+        # Task 4
+        (4, 1, "4.1 Tidak ada anonymous user & database test", check_mysql_anonymous, 2),
+        (4, 2, "4.2 Akun berbahaya (attacker@%) dihapus", check_mysql_attacker_removed, 2),
+        (4, 3, "4.3 bind-address = 127.0.0.1 & local_infile=0", check_mysql_bind_local_infile, 2),
+        (4, 4, "4.4 User lksuser dengan hak SELECT,INSERT,UPDATE,DELETE", check_mysql_lksuser, 2),
+        (4, 5, "4.5 Laporan hardening MySQL ada", check_mysql_report, 1),
+        # Task 5
+        (5, 1, "5.1 Snort terinstall", check_snort_installed, 2),
+        (5, 2, "5.2 Konfigurasi snort.conf valid", check_snort_config, 3),
+        (5, 3, "5.3 local.rules berisi aturan port scan & icmp flood", check_snort_local_rules, 4),
+        (5, 4, "5.4 Snort berjalan sebagai daemon", check_snort_daemon, 2),
+        (5, 5, "5.5 File alert berisi alert port scan dan icmp flood", check_snort_alert, 4),
+    ]
+
+    total_score = 0
+    max_total = 0
+    current_task = 0
+
+    for task_id, sub_id, desc, check_func, max_score in checks:
+        if task_id != current_task:
+            current_task = task_id
+            task_title = TASKS[task_id]["title"]
+            print(f"\n  {task_title}")
+        max_total += max_score
+        try:
+            result = check_func()
+        except Exception as e:
+            result = False
+            print_error(f"Error saat mengecek {desc}: {e}")
+        if result:
+            total_score += max_score
+            print(f"    {desc} ... {GREEN}[✔] BERHASIL (+{max_score}){RESET}")
+        else:
+            print(f"    {desc} ... {RED}[✘] KURANG AMAN (0){RESET}")
+
+    print(f"{BLUE}└────────────────────────────────────────────────────────────┘{RESET}")
+    print(f"📊 TOTAL SKOR: {total_score} / {max_total}")
+    print(f"⏱️  Waktu pengerjaan: {get_elapsed()}")
+    input("\nTekan Enter untuk kembali ke menu utama...")
+
+# ========================
+# Fungsi setup environment (tetap sama, tidak berubah)
 # ========================
 def setup_environment(force=False):
     if not force and os.path.exists(SETUP_FLAG):
@@ -112,26 +371,23 @@ def setup_environment(force=False):
         print_info("Dibatalkan.")
         return False
 
-    # Langkah 1: download
+    # Langkah 1: download LAMPP
     print_step("Mengunduh komponen pendukung...")
     if not os.path.exists(LAMPP_INSTALLER):
         try:
-            urllib.request.urlretrieve(LAMPP_URL, LAMPP_INSTALLER, reporthook=lambda b, bs, ts: progress_bar(b*bs, ts, "Download"))
+            urllib.request.urlretrieve(LAMPP_URL, LAMPP_INSTALLER)
             os.chmod(LAMPP_INSTALLER, 0o755)
-            print()
         except Exception as e:
             print_error(f"Gagal download: {e}")
             return False
 
-    # Langkah 2: install
+    # Langkah 2: install LAMPP
     print_step("Mengekstrak dan memasang...")
     if not os.path.exists(LAMPP_PATH):
         ret = subprocess.run(f"{LAMPP_INSTALLER} --mode unattended --installdir {LAMPP_PATH}", shell=True).returncode
         if ret != 0:
             print_error("Instalasi gagal")
             return False
-    spinner("Instalasi", 1)
-    print_success("Langkah 2 selesai.")
 
     # Langkah 3: tanam anomali (tidak dirinci)
     print_step("Menanamkan anomali sistem...")
@@ -171,76 +427,28 @@ def setup_environment(force=False):
     for f in ["public-lks.asc", "pesan.txt", "pesan.txt.gpg", "pesan.txt.sig"]:
         if os.path.exists(f):
             os.remove(f)
-    spinner("Menanamkan anomali", 2)
-    print_success("Langkah 3 selesai.")
-
-    # Langkah 4: finalisasi
-    print_step("Menyelesaikan persiapan...")
+    # Hapus flag Snort jika ada (biar fresh)
+    subprocess.run("sudo systemctl stop snort 2>/dev/null", shell=True)
+    # Tandai setup selesai
     with open(SETUP_FLAG, 'w') as f:
         f.write("setup completed")
-    spinner("Finalisasi", 1)
     print_success("Setup selesai. Sistem siap untuk tantangan hardening.")
     return True
 
 # ========================
-# Data soal (deskripsi per task)
+# Submenu soal (pilih task)
 # ========================
-TASKS = {
-    1: {
-        "title": "TASK 1: FIREWALL & PORT SECURITY",
-        "items": [
-            "1.1 Aktifkan UFW dengan default deny incoming",
-            "1.2 Blokir port berbahaya (21,23,25)",
-            "1.3 Izinkan HTTP (80) dan SSH hanya dari subnet tertentu",
-            "1.4 Set logging UFW ke low",
-            "1.5 Matikan service telnet dan ftp"
-        ]
-    },
-    2: {
-        "title": "TASK 2: HARDENING SSH",
-        "items": [
-            "2.1 Nonaktifkan root login via SSH",
-            "2.2 Batasi percobaan login gagal (MaxAuthTries ≤ 3)",
-            "2.3 Nonaktifkan forwarding berbahaya (Agent, TCP, Gateway, X11)",
-            "2.4 Atur ClientAliveInterval ≤ 300 detik",
-            "2.5 Tingkatkan logging SSH (VERBOSE)",
-            "2.6 Siapkan autentikasi kunci SSH"
-        ]
-    },
-    3: {
-        "title": "TASK 3: PGP ENKRIPSI EMAIL",
-        "items": [
-            "3.1 Install GnuPG",
-            "3.2 Buat key pair (LKS SMK / lks@smkprovinsi.id)",
-            "3.3 Ekspor public key ke public-lks.asc",
-            "3.4 Buat file pesan.txt berisi pesan rahasia",
-            "3.5 Enkripsi pesan menjadi pesan.txt.gpg",
-            "3.6 Buat dan verifikasi signature digital"
-        ]
-    },
-    4: {
-        "title": "TASK 4: KEAMANAN MYSQL (LAMPP)",
-        "items": [
-            "4.1 Hapus anonymous user dan database test",
-            "4.2 Hapus akun berbahaya (attacker@%)",
-            "4.3 Set bind-address = 127.0.0.1 dan nonaktifkan local_infile",
-            "4.4 Buat user lksuser dengan hak SELECT, INSERT, UPDATE, DELETE",
-            "4.5 Buat laporan hardening MySQL di /root/mysql_hardening_report.txt"
-        ]
-    }
-}
-
 def show_soal_submenu():
     while True:
         print_header()
         print(f"{BOLD}{CYAN}📚 DAFTAR SOAL:{RESET}")
-        for i in range(1, 5):
+        for i in range(1, 6):
             print(f"   [{i}] {TASKS[i]['title']}")
         print("   [0] Kembali ke Menu Utama")
-        choice = input(f"{CYAN}👉 Pilih task [0-4]: {RESET}").strip()
+        choice = input(f"{CYAN}👉 Pilih task [0-5]: {RESET}").strip()
         if choice == '0':
             break
-        elif choice in ['1','2','3','4']:
+        elif choice in ['1','2','3','4','5']:
             task_id = int(choice)
             print_header()
             print(f"{BOLD}{CYAN}{TASKS[task_id]['title']}{RESET}")
@@ -254,74 +462,6 @@ def show_soal_submenu():
             time.sleep(1)
 
 # ========================
-# Scoring (placeholder)
-# ========================
-def run_scoring():
-def run_scoring():
-    print_header()
-    print_info("Memulai proses scoring...")
-    print(f"{BLUE}┌─────────────────── SCORING OTOMATIS ───────────────────┐{RESET}")
-
-    # Definisikan skor maks per sub-task (contoh)
-    # Format: (task_id, sub_id, deskripsi, max_score, status_placeholder)
-    # Status nanti diisi berdasarkan pengecekan nyata
-    all_items = [
-        # Task 1
-        (1, 1, "1.1 Kebijakan default firewall", 2, None),
-        (1, 2, "1.2 Port berbahaya diblokir", 2, None),
-        (1, 3, "1.3 Layanan web (HTTP) dapat diakses", 1, None),
-        (1, 4, "1.4 Logging firewall", 1, None),
-        (1, 5, "1.5 Layanan tidak aman mati", 2, None),
-        # Task 2
-        (2, 1, "2.1 Root login via SSH", 2, None),
-        (2, 2, "2.2 MaxAuthTries ≤ 3", 2, None),
-        (2, 3, "2.3 Forwarding berbahaya dinonaktifkan", 2, None),
-        (2, 4, "2.4 ClientAliveInterval ≤ 300", 1, None),
-        (2, 5, "2.5 Logging SSH VERBOSE", 1, None),
-        (2, 6, "2.6 Autentikasi kunci SSH siap", 2, None),
-        # Task 3
-        (3, 1, "3.1 GnuPG terinstal", 1, None),
-        (3, 2, "3.2 Key pair PGP (lks@smkprovinsi.id)", 2, None),
-        (3, 3, "3.3 Public key diekspor (public-lks.asc)", 1, None),
-        (3, 4, "3.4 File pesan.txt ada", 1, None),
-        (3, 5, "3.5 Enkripsi pesan (pesan.txt.gpg)", 1, None),
-        (3, 6, "3.6 Signature digital valid", 2, None),
-        # Task 4
-        (4, 1, "4.1 Tidak ada anonymous user & database test", 2, None),
-        (4, 2, "4.2 Akun berbahaya (attacker@%) dihapus", 2, None),
-        (4, 3, "4.3 bind-address = 127.0.0.1 & local_infile=0", 2, None),
-        (4, 4, "4.4 User lksuser dengan hak SELECT,INSERT,UPDATE,DELETE", 2, None),
-        (4, 5, "4.5 Laporan hardening MySQL ada", 1, None),
-    ]
-
-    total_score = 0
-    max_total = 0
-    current_task = 0
-
-    for task_id, sub_id, desc, max_score, _ in all_items:
-        if task_id != current_task:
-            current_task = task_id
-            print(f"\n  TASK {task_id}: {['FIREWALL & PORT SECURITY', 'HARDENING SSH', 'PGP ENKRIPSI EMAIL', 'KEAMANAN MYSQL (LAMPP)'][task_id-1]}")
-        max_total += max_score
-
-        if sub_id % 2 == 1:
-            status = "BERHASIL"
-            color = GREEN
-            score = max_score
-        else:
-            status = "KURANG AMAN"
-            color = RED
-            score = 0
-
-        total_score += score
-        print(f"    {desc} ... {color}{'✅' if status=='BERHASIL' else '❌'} {status} ({'+'+str(score) if score>0 else '0'}){RESET}")
-
-    print(f"{BLUE}└────────────────────────────────────────────────────────────┘{RESET}")
-    print(f"📊 TOTAL SKOR: {total_score} / {max_total}")
-    print(f"⏱️  Waktu pengerjaan: {get_elapsed()}")
-    input("\nTekan Enter untuk kembali ke menu utama...")
-
-# ========================
 # Menu utama
 # ========================
 def main_menu():
@@ -332,9 +472,9 @@ def main_menu():
         else:
             print(f"{RED}❌ STATUS: Environment BELUM disetup. Pilih opsi 2 untuk memulai.{RESET}")
         print(f"\n{BOLD}📋 Pilih tindakan:{RESET}")
-        print("   [1] Soal")
+        print("   [1] Lihat Soal")
         print("   [2] Setup Ulang")
-        print("   [3] Scoring")
+        print("   [3] Jalankan Scoring")
         print("   [0] Keluar")
         choice = input(f"{CYAN}👉 Masukkan nomor [0-3]: {RESET}").strip()
         if choice == '1':
@@ -384,8 +524,8 @@ def main():
         return
 
     if args.questions:
-        # tampilkan semua soal sekaligus lalu keluar
-        for task_id in range(1,5):
+        # Tampilkan semua soal
+        for task_id in range(1, 6):
             print(f"\n{BOLD}{CYAN}{TASKS[task_id]['title']}{RESET}")
             for item in TASKS[task_id]['items']:
                 print(f"  {item}")
