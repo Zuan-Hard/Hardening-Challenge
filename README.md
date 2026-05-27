@@ -1,7 +1,3 @@
-Maaf, salah tangkep. Lu minta **teks README.md** versi bash (artinya teks biasa yang gak pake formatting aneh-aneh) biar lo tinggal copy. Bukan script hardening bash.
-
-Ini dia, teks README.md siap copy:
-
 ```markdown
 # Hardening Challenge for Blue Team
 
