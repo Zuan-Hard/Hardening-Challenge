@@ -98,4 +98,3 @@ sudo hardening --score
 - Setup butuh koneksi internet (~200MB download).
 - Timer berjalan sejak script dipanggil.
 - Scoring hanya bilang "BERHASIL" atau "KURANG AMAN" (tanpa detail).
-```
